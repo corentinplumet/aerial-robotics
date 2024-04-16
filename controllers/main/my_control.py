@@ -41,10 +41,24 @@ def get_command(sensor_data, camera_data, dt):
         on_ground = False
 
     # ---- YOUR CODE HERE ----
-    control_command = [0.0, 0.0, height_desired, 1.0]
+    control_command = [0.0, 0.0, height_desired, 0.0]
     on_ground = False
-    # map = occupancy_map(sensor_data)
-    
+    map = occupancy_map(sensor_data)
+
+    limit_position_x = sensor_data['x_global'] + 0.3
+    limit_position_y = sensor_data['y_global'] + 1
+
+    discrete_limit_x = limit_position_x/res_pos
+    discrete_limit_y = limit_position_y/res_pos
+
+    for x in map[sensor_data['x_global']:(sensor_data['x_global']+discrete_limit_y)][sensor_data['y_global']]:
+        if x < 0.5:
+            control_command = [0.0, 0.0, height_desired, 0.1]
+        else:
+            control_command = [1.0, 0.0, height_desired, 0.0]
+
+    print(sensor_data['x_global'], sensor_data['y_global'])
+
     return control_command # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
 
 

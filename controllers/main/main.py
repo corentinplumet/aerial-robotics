@@ -1,7 +1,7 @@
 # Main simulation file called by the Webots
-
+#ceci est un test
 import numpy as np
-from controller import Supervisor, Keyboard
+from controller import Supervisor, Keyboard # type: ignore
 from control import quadrotor_controller_setpoint, quadrotor_controller_command
 from kalman_filter import kalman_filter as KF
 import utils
