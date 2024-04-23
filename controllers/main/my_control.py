@@ -41,26 +41,35 @@ def get_command(sensor_data, camera_data, dt):
         on_ground = False
 
     # ---- YOUR CODE HERE ----
-    control_command = [0.0, 0.0, height_desired, 0.0]
+    control_command = [1.0, 0.0, height_desired, 0.0]
     on_ground = False
     map = occupancy_map(sensor_data)
 
-    limit_position_x = sensor_data['x_global'] + 0.3
-    limit_position_y = sensor_data['y_global'] + 1
-
-    discrete_limit_x = limit_position_x/res_pos
-    discrete_limit_y = limit_position_y/res_pos
-
-    for x in map[sensor_data['x_global']:(sensor_data['x_global']+discrete_limit_y)][sensor_data['y_global']]:
-        if x < 0.5:
-            control_command = [0.0, 0.0, height_desired, 0.1]
-        else:
-            control_command = [1.0, 0.0, height_desired, 0.0]
-
-    print(sensor_data['x_global'], sensor_data['y_global'])
-
+    state = 'initial'
+    state = state_update(sensor_data, map, res_pos, state)
+    print(state)
     return control_command # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
 
+def state_update(sensor_data, map, res_pos, state):
+    disc_pos_x = int(sensor_data['x_global'] // res_pos)
+    disc_pos_y = int(sensor_data['y_global'] // res_pos)
+
+    for element in map[disc_pos_x:min(disc_pos_x + 3, len(map))]:
+        print(element[disc_pos_y])
+        if element[disc_pos_y] < 0:
+            state = 'stop'
+    print(state)
+                
+    return state
+    """
+    disc_pos_y = int(sensor_data['y_global'] // res_pos)
+    y_column = map[:, disc_pos_x]
+    for element in y_column[disc_pos_y:min(disc_pos_y + 3, len(y_column))]:
+        print(element)
+        if element < 0:
+            control_command = [0.0, 0.0, height_desired, 0.0] 
+            return control_command 
+    """
 
 # Occupancy map based on distance sensor
 min_x, max_x = 0, 5.0 # meter
