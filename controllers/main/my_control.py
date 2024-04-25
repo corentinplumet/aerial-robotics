@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import cv2
+import heapq
+from collections import deque
 
 # Global variables
 on_ground = True
@@ -11,6 +13,7 @@ timer = None
 startpos = None
 timer_done = None
 var = dict(control_command=[0, 0, 0, 0], state='initial', left=0, right=0, straight=0)
+
 
 # The available ground truth state measurements can be accessed by calling sensor_data[item]. All values of "item" are provided as defined in main.py lines 296-323. 
 # The "item" values that you can later use in the hardware project are:
@@ -37,7 +40,7 @@ def get_command(sensor_data, camera_data, dt):
         startpos = [sensor_data['x_global'], sensor_data['y_global'], sensor_data['range_down']]    
     if on_ground and sensor_data['range_down'] < 0.75:
         var['control_command'] = [0.0, 0.0, height_desired, 0.0]
-        var['state'] = 'forward'
+        var['state'] = 'check_angles'
         return var['control_command']
     else:
         on_ground = False
@@ -47,7 +50,81 @@ def get_command(sensor_data, camera_data, dt):
     disc_pos_x = int(sensor_data['x_global'] // res_pos)
     disc_pos_y = int(sensor_data['y_global'] // res_pos)
 
+    if var['state'] == 'check_angles': 
+        check_angles(sensor_data, var)
 
+    if var['state'] == 'path_finding':
+        start = (disc_pos_x, disc_pos_y)
+        path = a_star(map.copy(), start, max_y)
+        var['state'] = 'path_following'
+        print(path)        
+
+    return var['control_command'] # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
+
+
+def a_star(grid, start, max_y):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    def reconstruct_path(came_from, current):
+        path = deque()
+        while current in came_from:
+            path.appendleft(current)
+            current = came_from[current]
+        return path
+    
+    # ---- ---- ----
+    goal = (0, 0)
+    for i, row in enumerate(grid):
+        for j, element in enumerate(row):
+            if element <= 0.2:
+                grid[i][j] = 1
+            else:
+                grid[i][j] = 0
+                if i > goal[0]:
+                    goal = (i, j)
+    print(goal)
+    # ---- ---- ----
+
+    open_set = []
+    heapq.heappush(open_set, (0, start))
+    came_from = {}
+    g_score = {start: 0}
+    f_score = {start: heuristic(start, goal)}
+    while open_set:
+        current = heapq.heappop(open_set)[1]
+        if current == goal:
+            return reconstruct_path(came_from, current)
+        for neighbor in [(current[0]+1, current[1]), (current[0]-1, current[1]), (current[0], current[1]+1), (current[0], current[1]-1)]:
+            if 0 <= neighbor[0] < len(grid) and 0 <= neighbor[1] < len(grid[0]) and not grid[neighbor[0]][neighbor[1]]:
+                tentative_g_score = g_score[current] + 1
+                if tentative_g_score < g_score.get(neighbor, float("inf")):
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = tentative_g_score + heuristic(neighbor, goal)
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+    return None
+
+def check_angles(sensor_data, var):
+    if sensor_data['yaw'] > 1:
+        var['left'] = 1
+    if sensor_data['yaw'] < -1:
+        var['right'] = 1
+    if (sensor_data['yaw'] < 0.05 and sensor_data['yaw'] > -0.05 and var['left'] == 1 and var['right'] == 1):
+        var['straight'] = 1
+
+    if var['left'] == 0:
+        var['control_command'] = [0.0, 0.0, height_desired, 1]
+    elif var['right'] == 0:
+        var['control_command'] = [0.0, 0.0, height_desired, -1]
+    elif var['straight'] == 0:
+        var['control_command'] = [0.0, 0.0, height_desired, 1]
+    else:
+        var['state'] = 'path_finding'
+        var['left'] = 0
+        var['right'] = 0
+        var['straight'] = 0
+
+    '''
     # ---- STATE DETERMINATION ----
     if var['state'] == 'forward':
         forward(disc_pos_x, disc_pos_y, var, map)
@@ -162,7 +239,7 @@ def right(disc_pos_y, disc_pos_x, var, map):
         for i, element in enumerate(map[disc_pos_x:min(disc_pos_x + 5, len(map))]): 
             if (element[disc_pos_y] < 0 or element[disc_pos_y + 1] < 0 or element[disc_pos_y - 1] < 0):
                 var['state'] = 'right'
-                break
+                break '''
 
     
 # Occupancy map based on distance sensor
