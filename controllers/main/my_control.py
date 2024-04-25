@@ -10,7 +10,7 @@ height_desired = 0.8
 timer = None
 startpos = None
 timer_done = None
-state = 'initial'
+var = dict(control_command=[0, 0, 0, 0], state='initial', left=0, right=0, straight=0)
 
 # The available ground truth state measurements can be accessed by calling sensor_data[item]. All values of "item" are provided as defined in main.py lines 296-323. 
 # The "item" values that you can later use in the hardware project are:
@@ -25,107 +25,151 @@ state = 'initial'
 
 # This is the main function where you will implement your control algorithm
 def get_command(sensor_data, camera_data, dt):
-    global on_ground, startpos, state
+    global on_ground, startpos, var
 
     # Open a window to display the camera image
     # NOTE: Displaying the camera image will slow down the simulation, this is just for testing
     # cv2.imshow('Camera Feed', camera_data)
     # cv2.waitKey(1)
-    
+    print(var['state'])
     # Take off
     if startpos is None:
         startpos = [sensor_data['x_global'], sensor_data['y_global'], sensor_data['range_down']]    
     if on_ground and sensor_data['range_down'] < 0.75:
-        state = 'forward'
-        control_command = [0.0, 0.0, height_desired, 0.0]
-        return control_command
+        var['control_command'] = [0.0, 0.0, height_desired, 0.0]
+        var['state'] = 'forward'
+        return var['control_command']
     else:
         on_ground = False
 
     # ---- YOUR CODE HERE ----
     map = occupancy_map(sensor_data)
- 
     disc_pos_x = int(sensor_data['x_global'] // res_pos)
     disc_pos_y = int(sensor_data['y_global'] // res_pos)
 
-    if state == 'forward':
-        for i, element in enumerate(map[disc_pos_x:min(disc_pos_x + 3, len(map))]):
-            if element[disc_pos_y] < 0 or element[disc_pos_y + 1] < 0 or element[disc_pos_y - 1] < 0: 
-                state = 'stop'
-                break
-            else:
-                state = 'forward'
 
-    print(state)
+    # ---- STATE DETERMINATION ----
+    if var['state'] == 'forward':
+        forward(disc_pos_x, disc_pos_y, map, var)
+    
+    if var['state'] == 'check_angles': 
+        check_angles(sensor_data, var)
 
-    """ if state == 'stop':
-        y_column = map[:, disc_pos_x]
-        block_1 = 10
-        block_2 = 10
-        for j, element in enumerate(y_column[disc_pos_y:min(disc_pos_y + 10, len(map))]): 
-            if element < -0.5:
-                block_1 = j
-                break
-        for k, element in enumerate(reversed(y_column[max(disc_pos_y -10, 0):disc_pos_y])):
-            print('ata')
-            print(k)
-            if element < -0.5:
-                block_2 = k
-                break
-        if block_1 < block_2:
-            state = 'right'
+    if var['state'] == 'stop':
+        stop(disc_pos_y, map, var)
+
+    print(var['state'])
+
+    if var['state'] == 'left':
+        left(disc_pos_y, disc_pos_x, var, map)
+
+    if var['state'] == 'right':
+        right(disc_pos_y, disc_pos_x, var, map)
+            
+    # ---- COMMAND DEPENDING ON THE STATE ----
+    if var['state'] == 'initial':
+        var['control_command'] = [0.0, 0.0, height_desired, 0.0]
+    elif var['state'] == 'stop':
+        var['control_command'] = [0.0, 0.0, height_desired, 0.0]
+    elif var['state'] == 'forward':
+        var['control_command'] = [0.3, 0.0, height_desired, 0.0]
+    elif var['state'] == 'yaw_left':
+        var['control_command'] = [0.0, 0.0, height_desired, 1]
+    elif var['state'] == 'yaw_right':
+        var['control_command'] = [0.0, 0.0, height_desired, -1]
+    elif var['state'] == 'left':
+        var['control_command'] = [0.0, 0.3, height_desired, 0.0]
+    elif var['state'] == 'right':
+        var['control_command'] = [0.0, -0.3, height_desired, 0.0]
+    elif var['state'] == 'back':
+        var['control_command'] = [0.0, 0.0, height_desired, 0.0]
+    elif var['state'] == 'land':
+        var['control_command'] = [0.0, 0.0, 0.0, 0.0] 
+
+    return var['control_command'] # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
+
+def forward(disc_pos_x, disc_pos_y, map, var):
+    for i, element in enumerate(reversed(map[disc_pos_x+1:min(disc_pos_x + 5, len(map))])):
+        if (element[disc_pos_y] > 0 and element[disc_pos_y + 1] > 0 and element[disc_pos_y - 1] > 0
+            and element[disc_pos_y + 2] > 0 and element[disc_pos_y - 2] > 0):
+            state = 'forward'
+            break
+        elif (element[disc_pos_y] > -0.3 and element[disc_pos_y + 1] > -0.3 and element[disc_pos_y - 1] > -0.3
+              and element[disc_pos_y + 2] > -0.3 and element[disc_pos_y - 2] > -0.3):
+            var['state'] = 'check_angles'
         else:
-            state = 'left'
+            var['state'] ='stop'
+            break
 
-    if state == 'left':
-        state = 'forward'
+def check_angles(sensor_data, var):
+    if sensor_data['yaw'] > 1:
+        var['left'] = 1
+    if sensor_data['yaw'] < -1:
+        var['right'] = 1
+    if (sensor_data['yaw'] < 0.05 and sensor_data['yaw'] > -0.05 and var['left'] == 1 and var['right'] == 1):
+        var['straight'] = 1
+
+    if var['left'] == 0:
+        var['control_command'] = [0.0, 0.0, height_desired, 1]
+    elif var['right'] == 0:
+        var['control_command'] = [0.0, 0.0, height_desired, -1]
+    elif var['straight'] == 0:
+        var['control_command'] = [0.0, 0.0, height_desired, 1]
+    else:
+        var['state'] = 'forward'
+        var['left'] = 0
+        var['right'] = 0
+        var['straight'] = 0
+
+def stop(disc_pos_y, var, map):
+    y_column = map[:, disc_pos_y]
+    block_1 = 20
+    block_2 = 20
+    for j, element in enumerate(y_column[disc_pos_y:min(disc_pos_y + 7, len(map[0]))]): 
+        if element < -0.5:
+            block_1 = j
+            break
+    for k, element in enumerate(reversed(y_column[max(disc_pos_y - 7, 0):disc_pos_y])):
+        if element < -0.5:
+            block_2 = k
+            break
+    if block_1 == block_2:
+        if disc_pos_y > max_y/(2*res_pos):
+            var['state'] = 'right'
+        else:
+            var['state'] = 'left'
+    elif block_1 < block_2:
+        var['state'] = 'right'
+    else:
+        var['state'] = 'left'
+    print(block_1, block_2)
+
+def left(disc_pos_y, disc_pos_x, var, map):
+    var['state'] = 'forward'
+    if disc_pos_y < 4:
+        var['state'] = 'right'
+    else:
         for i, element in enumerate(map[disc_pos_x:min(disc_pos_x + 5, len(map))]): 
-            if element[disc_pos_y] < 0:
-                state = 'left'
+            if (element[disc_pos_y] < 0 or element[disc_pos_y + 1] < 0 or element[disc_pos_y - 1] < 0):
+                var['state'] = 'left'
                 break  
 
-    if state == 'right':
-        state = 'forward'
+def right(disc_pos_y, disc_pos_x, var, map):
+    var['state'] = 'forward'
+    if disc_pos_y < 4:
+        var['state'] = 'left'
+    else:
         for i, element in enumerate(map[disc_pos_x:min(disc_pos_x + 5, len(map))]): 
-            if element[disc_pos_y] < 0:
-                state = 'right'
-                break  """
-            
-    if state == 'initial':
-        control_command = [0.0, 0.0, height_desired, 0.0]
-    elif state == 'stop':
-        control_command = [0.0, 0.0, height_desired, 0.0]
-    elif state == 'forward':
-        control_command = [0.3, 0.0, height_desired, 0.0]
-    elif state == 'left':
-        control_command = [0.0, 0.3, height_desired, 0.0]
-    elif state == 'right':
-        control_command = [0.0, -0.3, height_desired, 0.0]
-    elif state == 'back':
-        control_command = [0.0, 0.0, height_desired, 0.0]
-    elif state == 'land':
-        control_command = [0.0, 0.0, 0.0, 0.0] 
+            if (element[disc_pos_y] < 0 or element[disc_pos_y + 1] < 0 or element[disc_pos_y - 1] < 0):
+                var['state'] = 'right'
+                break
 
-    return control_command # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
-
-def state_update(sensor_data, map, res_pos):
-    disc_pos_x = int(sensor_data['x_global'] // res_pos)
-    disc_pos_y = int(sensor_data['y_global'] // res_pos)
-
-    for element in map[disc_pos_x:min(disc_pos_x + 3, len(map))]:
-        print(element[disc_pos_y])
-        if element[disc_pos_y] < 0:
-            state = 'stop'
-        else:
-            state = 'forward'
-                
-    return state
-
+    
 # Occupancy map based on distance sensor
 min_x, max_x = 0, 5.0 # meter
-min_y, max_y = 0, 5.0 # meter
+min_y, max_y = 0, 3.0 # meter
 range_max = 2.0 # meter, maximum range of distance sensor
-res_pos = 0.2 # meter
+res_pos = 0.1 # meter
 conf = 0.2 # certainty given by each measurement
 t = 0 # only for plotting
 
