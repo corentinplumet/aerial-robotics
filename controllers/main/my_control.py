@@ -50,13 +50,13 @@ def get_command(sensor_data, camera_data, dt):
 
     # ---- STATE DETERMINATION ----
     if var['state'] == 'forward':
-        forward(disc_pos_x, disc_pos_y, map, var)
+        forward(disc_pos_x, disc_pos_y, var, map)
     
     if var['state'] == 'check_angles': 
         check_angles(sensor_data, var)
 
     if var['state'] == 'stop':
-        stop(disc_pos_y, map, var)
+        stop(disc_pos_x, disc_pos_y, var, map)
 
     print(var['state'])
 
@@ -88,7 +88,7 @@ def get_command(sensor_data, camera_data, dt):
 
     return var['control_command'] # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
 
-def forward(disc_pos_x, disc_pos_y, map, var):
+def forward(disc_pos_x, disc_pos_y, var, map):
     for i, element in enumerate(reversed(map[disc_pos_x+1:min(disc_pos_x + 5, len(map))])):
         if (element[disc_pos_y] > 0 and element[disc_pos_y + 1] > 0 and element[disc_pos_y - 1] > 0
             and element[disc_pos_y + 2] > 0 and element[disc_pos_y - 2] > 0):
@@ -121,15 +121,15 @@ def check_angles(sensor_data, var):
         var['right'] = 0
         var['straight'] = 0
 
-def stop(disc_pos_y, var, map):
-    y_column = map[:, disc_pos_y]
+def stop(disc_pos_x, disc_pos_y, var, map):
+    x_column = map[disc_pos_x, :]
     block_1 = 20
     block_2 = 20
-    for j, element in enumerate(y_column[disc_pos_y:min(disc_pos_y + 7, len(map[0]))]): 
+    for j, element in enumerate(x_column[disc_pos_y:min(disc_pos_y + 7, len(map))]): 
         if element < -0.5:
             block_1 = j
             break
-    for k, element in enumerate(reversed(y_column[max(disc_pos_y - 7, 0):disc_pos_y])):
+    for k, element in enumerate(reversed(x_column[max(disc_pos_y - 7, 0):disc_pos_y])):
         if element < -0.5:
             block_2 = k
             break
