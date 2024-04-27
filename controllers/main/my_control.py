@@ -13,6 +13,8 @@ timer = None
 startpos = None
 timer_done = None
 var = dict(control_command=[0, 0, 0, 0], state='initial', left=0, right=0, straight=0)
+landing_spots = deque()
+plt_find = False
 
 
 # The available ground truth state measurements can be accessed by calling sensor_data[item]. All values of "item" are provided as defined in main.py lines 296-323. 
@@ -28,7 +30,7 @@ var = dict(control_command=[0, 0, 0, 0], state='initial', left=0, right=0, strai
 
 # This is the main function where you will implement your control algorithm
 def get_command(sensor_data, camera_data, dt):
-    global on_ground, startpos, var
+    global on_ground, startpos, var, path, landing_spots, plt_find
 
     # Open a window to display the camera image
     # NOTE: Displaying the camera image will slow down the simulation, this is just for testing
@@ -37,6 +39,9 @@ def get_command(sensor_data, camera_data, dt):
     print(var['state'])
     # Take off
     if startpos is None:
+        for i in np.arange(3.5, 5, 0.3):
+            for j in np.arange(0, 3, 0.3):
+                landing_spots.append((i//0.15, j//0.15))
         startpos = [sensor_data['x_global'], sensor_data['y_global'], sensor_data['range_down']]    
     if on_ground and sensor_data['range_down'] < 0.75:
         var['control_command'] = [0.0, 0.0, height_desired, 0.0]
@@ -55,14 +60,55 @@ def get_command(sensor_data, camera_data, dt):
 
     if var['state'] == 'path_finding':
         start = (disc_pos_x, disc_pos_y)
-        path = a_star(map.copy(), start, max_y)
+        goal, grid = goal_definition(map.copy(), landing_spots, var)
+        path = a_star(grid, start, goal)
+        var['state'] = 'path_following'      
+        print(f"path finding : {path}")
+
+    if var['state'] == 'path_following':
+        disc_pos_x, disc_pos_y
+        path_following(sensor_data, disc_pos_x, disc_pos_y, var, path)
+        if disc_pos_x >= 3.5//res_pos and plt_find == False:
+            var['state'] = 'plateform_finding'
+            plt_find = True
+        print(f"path following : {path}")
+    
+    if var['state'] == 'plateform_finding':
+        start = (disc_pos_x, disc_pos_y)
+        goal, grid = goal_definition(map.copy(), landing_spots, var)
+        path = a_star(grid, start, goal)
         var['state'] = 'path_following'
-        print(path)        
+        var['control_command'] = [0.0, 0.0, height_desired, 0.0]
+        print(f"plateform fiding : {path}")
 
     return var['control_command'] # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
 
+def goal_definition(grid, landing_spots, var):
+    goal = (0, 0)
+    for i, row in enumerate(grid):
+        for j, element in enumerate(row):
+            if element <= 0.2:
+                grid[i][j] = 1
+            else:
+                grid[i][j] = 0
+                if i > goal[0] and var['state'] == 'path_finding':
+                    goal = (i, j)
+    if var['state'] == 'plateform_finding':
+        print(f"landing_spots_before_while : {landing_spots}")        
+        while goal == (0, 0):
+            print(f"landing_spots_in_while : {landing_spots}")  
+            landing_spot = landing_spots[0]
+            landing_spot_int = (int(landing_spot[0]), int(landing_spot[1]))
+            if grid[landing_spot_int[0]][landing_spot_int[1]] == 1:
+                landing_spots.popleft()
+                goal = landing_spots[0]
+            else:
+                goal = landing_spots[0]
+        print(f"landing_spots_after_while : {landing_spots}")  
+        landing_spots.popleft()
+    return goal, grid   
 
-def a_star(grid, start, max_y):
+def a_star(grid, start, goal):
     def heuristic(a, b):
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
     def reconstruct_path(came_from, current):
@@ -71,20 +117,6 @@ def a_star(grid, start, max_y):
             path.appendleft(current)
             current = came_from[current]
         return path
-    
-    # ---- ---- ----
-    goal = (0, 0)
-    for i, row in enumerate(grid):
-        for j, element in enumerate(row):
-            if element <= 0.2:
-                grid[i][j] = 1
-            else:
-                grid[i][j] = 0
-                if i > goal[0]:
-                    goal = (i, j)
-    print(goal)
-    # ---- ---- ----
-
     open_set = []
     heapq.heappush(open_set, (0, start))
     came_from = {}
@@ -109,7 +141,7 @@ def check_angles(sensor_data, var):
         var['left'] = 1
     if sensor_data['yaw'] < -1:
         var['right'] = 1
-    if (sensor_data['yaw'] < 0.05 and sensor_data['yaw'] > -0.05 and var['left'] == 1 and var['right'] == 1):
+    if (sensor_data['yaw'] < 0.01 and sensor_data['yaw'] > -0.01 and var['left'] == 1 and var['right'] == 1):
         var['straight'] = 1
 
     if var['left'] == 0:
@@ -119,10 +151,53 @@ def check_angles(sensor_data, var):
     elif var['straight'] == 0:
         var['control_command'] = [0.0, 0.0, height_desired, 1]
     else:
-        var['state'] = 'path_finding'
+        if plt_find == False:
+            var['state'] = 'path_finding'
+        else:
+            var['state'] = 'plateform_finding'
         var['left'] = 0
         var['right'] = 0
         var['straight'] = 0
+
+def path_following(sensor_data, disc_pos_x, disc_pos_y, var, path):
+    if len(path) == 0:
+        if plt_find == False:
+            var['state'] = 'check_angles'
+            return
+        else:
+            if len(landing_spots) % 7 == 0:
+                var['state'] = 'check_angles'
+                return
+            else:
+                var['state'] = 'plateform_finding'
+                return
+        
+    if disc_pos_x < path[0][0] and disc_pos_y == path[0][1]:
+        var['control_command'] = [0.25, 0.0, height_desired, 0]
+        if sensor_data['range_front'] < res_pos:
+            var['control_command'] = [-0.3, 0.0, height_desired, 0]
+            var['state'] = 'check_angles'
+             
+    elif disc_pos_x > path[0][0] and disc_pos_y == path[0][1]:
+        var['control_command'] = [-0.25, 0.0, height_desired, 0]
+        if sensor_data['range_back'] < res_pos:
+             var['control_command'] = [0.3, 0.0, height_desired, 0]
+             var['state'] = 'check_angles'
+             
+    elif disc_pos_x == path[0][0] and disc_pos_y < path[0][1]:
+        var['control_command'] = [0.0, 0.25, height_desired, 0]
+        if sensor_data['range_left'] < res_pos:
+             var['control_command'] = [0.0, -0.3, height_desired, 0]
+             var['state'] = 'check_angles'
+             
+    elif disc_pos_x == path[0][0] and disc_pos_y > path[0][1]:
+        var['control_command'] = [0.0, -0.25, height_desired, 0]
+        if sensor_data['range_right'] < res_pos:
+             var['control_command'] = [0.0, 0.3, height_desired, 0]
+             var['state'] = 'check_angles'         
+    
+    if disc_pos_x == path[0][0] and disc_pos_y == path[0][1]:
+        path.popleft()
 
     '''
     # ---- STATE DETERMINATION ----
@@ -246,7 +321,7 @@ def right(disc_pos_y, disc_pos_x, var, map):
 min_x, max_x = 0, 5.0 # meter
 min_y, max_y = 0, 3.0 # meter
 range_max = 2.0 # meter, maximum range of distance sensor
-res_pos = 0.1 # meter
+res_pos = 0.15 # meter
 conf = 0.2 # certainty given by each measurement
 t = 0 # only for plotting
 
