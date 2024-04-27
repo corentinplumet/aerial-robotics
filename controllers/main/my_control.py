@@ -14,8 +14,9 @@ startpos = None
 timer_done = None
 var = dict(control_command=[0, 0, 0, 0], state='initial', left=0, right=0, straight=0)
 landing_spots = deque()
+mapping = deque()
+visited_points = deque()
 plt_find = False
-
 
 # The available ground truth state measurements can be accessed by calling sensor_data[item]. All values of "item" are provided as defined in main.py lines 296-323. 
 # The "item" values that you can later use in the hardware project are:
@@ -30,7 +31,7 @@ plt_find = False
 
 # This is the main function where you will implement your control algorithm
 def get_command(sensor_data, camera_data, dt):
-    global on_ground, startpos, var, path, landing_spots, plt_find
+    global on_ground, startpos, var, path, landing_spots, plt_find, visited_points, mapping
 
     # Open a window to display the camera image
     # NOTE: Displaying the camera image will slow down the simulation, this is just for testing
@@ -39,10 +40,17 @@ def get_command(sensor_data, camera_data, dt):
     print(var['state'])
     # Take off
     if startpos is None:
-        for i in np.arange(3.5, 5, 0.3):
-            for j in np.arange(0, 3, 0.3):
-                landing_spots.append((i//0.15, j//0.15))
-        startpos = [sensor_data['x_global'], sensor_data['y_global'], sensor_data['range_down']]    
+        for i in np.arange(3.65, 5, 0.3):
+            for j in np.arange(0.15, 3.15, 0.3):
+                landing_spots.append((i//0.15, j//0.15))              
+        landing_spots = [list(t) for t in landing_spots]
+        # Apply inversion pattern
+        for i in range(0, len(landing_spots), 20):
+            landing_spots[i+10:i+20] = landing_spots[i+10:i+20][::-1]
+        # Convert list back to tuples
+        landing_spots = deque([tuple(lst) for lst in landing_spots])
+        mapping = landing_spots
+        startpos = [sensor_data['x_global'], sensor_data['y_global'], sensor_data['range_down']]          
     if on_ground and sensor_data['range_down'] < 0.75:
         var['control_command'] = [0.0, 0.0, height_desired, 0.0]
         var['state'] = 'check_angles'
@@ -52,8 +60,9 @@ def get_command(sensor_data, camera_data, dt):
 
     # ---- YOUR CODE HERE ----
     map = occupancy_map(sensor_data)
-    disc_pos_x = int(sensor_data['x_global'] // res_pos)
-    disc_pos_y = int(sensor_data['y_global'] // res_pos)
+    disc_pos_x = int(sensor_data['x_global'] // res_pos) + 1
+    disc_pos_y = int(sensor_data['y_global'] // res_pos) + 1
+    check_plateform(sensor_data, var)
 
     if var['state'] == 'check_angles': 
         check_angles(sensor_data, var)
@@ -75,14 +84,44 @@ def get_command(sensor_data, camera_data, dt):
     
     if var['state'] == 'plateform_finding':
         start = (disc_pos_x, disc_pos_y)
-        goal, grid = goal_definition(map.copy(), landing_spots, var)
-        path = a_star(grid, start, goal)
-        var['state'] = 'path_following'
-        var['control_command'] = [0.0, 0.0, height_desired, 0.0]
-        print(f"plateform fiding : {path}")
+        if len(landing_spots) == 0:
+            landing_spots = intersection_list(visited_points, mapping)
+            goal, grid = goal_definition(map.copy(), landing_spots, var)
+            path = a_star(grid, start, goal)
+            var['control_command'] = [0.0, 0.0, height_desired, 0.0]
+            print(f"landing_spots_remaining: {landing_spots}")
+        else:
+            goal, grid = goal_definition(map.copy(), landing_spots, var)
+            print(f"sart : {start}, goal : {goal}")
+            path = a_star(grid, start, goal)
+            var['state'] = 'path_following'
+            var['control_command'] = [0.0, 0.0, height_desired, 0.0]
+            print(f"plateform fiding : {path}")
+            
+    if var['state'] == 'landing':
+        if sensor_data['range_down'] > 0.75:    
+            var['control_command'] = [0.2, 0.0, height_desired, 0.0]
 
     return var['control_command'] # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
 
+def intersection_list(deque1, deque2):
+    set1 = set(deque1)
+    set2 = set(deque2)
+
+    # Compute the elements that are different between the two sets
+    different_elements = set1.symmetric_difference(set2)
+
+    # Convert the different elements back to a deque
+    result = deque(different_elements)
+    return result
+
+def check_plateform(sensor_data, var):
+    if sensor_data['range_down'] < 0.75:
+        var['control_command'] = [0.0, 0.0, height_desired, 0.0]
+        var['state'] = 'landing'
+        return var['control_command']
+
+'''
 def goal_definition(grid, landing_spots, var):
     goal = (0, 0)
     for i, row in enumerate(grid):
@@ -91,8 +130,27 @@ def goal_definition(grid, landing_spots, var):
                 grid[i][j] = 1
             else:
                 grid[i][j] = 0
-                if i > goal[0] and var['state'] == 'path_finding':
-                    goal = (i, j)
+                if var['state'] == 'path_finding':
+                    if i > goal[0]:
+                        goal = (i, j)'''
+
+def goal_definition(grid, landing_spots, var):
+    goal = (0, 0)
+    for i, row in enumerate(grid):
+        for j, element in enumerate(row):
+            if element <= 0.6:
+                grid[i][j] = 1
+            else:
+                grid[i][j] = 0
+                if var['state'] == 'path_finding':
+                    if i > goal[0]:
+                        goal = (i, j)
+                    elif i == goal[0]: 
+                        test = abs(j - (max_y/2)//res_pos) - abs(goal[1] - (max_y/2)//res_pos)
+                        if test < 0:
+                            goal = (i, j)
+                        else:
+                            goal = (i, goal[1])                       
     if var['state'] == 'plateform_finding':
         print(f"landing_spots_before_while : {landing_spots}")        
         while goal == (0, 0):
@@ -101,7 +159,6 @@ def goal_definition(grid, landing_spots, var):
             landing_spot_int = (int(landing_spot[0]), int(landing_spot[1]))
             if grid[landing_spot_int[0]][landing_spot_int[1]] == 1:
                 landing_spots.popleft()
-                goal = landing_spots[0]
             else:
                 goal = landing_spots[0]
         print(f"landing_spots_after_while : {landing_spots}")  
@@ -165,6 +222,7 @@ def path_following(sensor_data, disc_pos_x, disc_pos_y, var, path):
             var['state'] = 'check_angles'
             return
         else:
+            visited_points.append((disc_pos_x, disc_pos_y))
             if len(landing_spots) % 7 == 0:
                 var['state'] = 'check_angles'
                 return
@@ -315,8 +373,7 @@ def right(disc_pos_y, disc_pos_x, var, map):
             if (element[disc_pos_y] < 0 or element[disc_pos_y + 1] < 0 or element[disc_pos_y - 1] < 0):
                 var['state'] = 'right'
                 break '''
-
-    
+   
 # Occupancy map based on distance sensor
 min_x, max_x = 0, 5.0 # meter
 min_y, max_y = 0, 3.0 # meter
