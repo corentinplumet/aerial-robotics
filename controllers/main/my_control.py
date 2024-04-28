@@ -18,6 +18,7 @@ mapping = deque()
 visited_points = deque()
 plt_find = False
 landed = False
+timer = 0
 
 # The available ground truth state measurements can be accessed by calling sensor_data[item]. All values of "item" are provided as defined in main.py lines 296-323. 
 # The "item" values that you can later use in the hardware project are:
@@ -32,7 +33,7 @@ landed = False
 
 # This is the main function where you will implement your control algorithm
 def get_command(sensor_data, camera_data, dt):
-    global on_ground, startpos, var, path, landing_spots, plt_find, visited_points, mapping, landed
+    global on_ground, startpos, var, path, landing_spots, plt_find, visited_points, mapping, landed, timer
 
     # Open a window to display the camera image
     # NOTE: Displaying the camera image will slow down the simulation, this is just for testing
@@ -118,6 +119,13 @@ def get_command(sensor_data, camera_data, dt):
                 if sensor_data['range_down'] <= 0.05:
                     plt_find = False
                     landed = True
+                    timer = 1
+
+        if 0 < timer < 20:
+            timer += 1
+            var['control_command'] = [0.0, 0.0, 0.0, 0.0]
+        elif timer >= 20:
+            timer = 0
 
         if plt_find == False and landed == True:
             var['control_command'] = [0.0, 0.0, height_desired, 0.0]
